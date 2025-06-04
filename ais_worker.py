@@ -5,18 +5,19 @@ import websockets
 import json
 
 class AISWorker(QObject):
-    vessel_received = pyqtSignal(str, float, float)  # MMSI, lat, lon
+    vessel_received = pyqtSignal(str, float, float)  # mmsi, lat, lon
 
-    def __init__(self, parent=None):
+    def __init__(self, mmsi_name_map, parent=None):
         super().__init__(parent)
+        self.mmsi_name_map = mmsi_name_map #["258647000"]
         self.running = True
 
     async def connect_ais_stream(self):
         async with websockets.connect("wss://stream.aisstream.io/v0/stream") as websocket:
             subscribe_message = {
                 "APIKey": "af5abf1c3ef9f7fbbb340b9a778187b7b46d8bc3",
-                "BoundingBoxes": [[[37, -17], [71, 31]]],
-                "FiltersShipMMSI": ["258647000"],  # adjust as needed
+                "BoundingBoxes": [[[37, -17], [71, 31]]], # Europe
+                "FiltersShipMMSI": self.mmsi_name_map,  # adjust as needed
                 "FilterMessageTypes": ["PositionReport"]
             }
 
