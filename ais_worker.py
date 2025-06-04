@@ -1,0 +1,40 @@
+# ais_worker.py
+from PyQt5.QtCore import QObject, QThread, pyqtSignal
+import asyncio
+import websockets
+import json
+
+class AISWorker(QObject):
+    vessel_received = pyqtSignal(str, float, float)  # MMSI, lat, lon
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.running = True
+
+    async def connect_ais_stream(self):
+        async with websockets.connect("wss://stream.aisstream.io/v0/stream") as websocket:
+            subscribe_message = {
+                "APIKey": "af5abf1c3ef9f7fbbb340b9a778187b7b46d8bc3",
+                "BoundingBoxes": [[[37, -17], [71, 31]]],
+                "FiltersShipMMSI": ["258647000"],  # adjust as needed
+                "FilterMessageTypes": ["PositionReport"]
+            }
+
+            await websocket.send(json.dumps(subscribe_message))
+
+            async for message_json in websocket:
+                if not self.running:
+                    break
+                message = json.loads(message_json)
+                if message["MessageType"] == "PositionReport":
+                    msg = message["Message"]["PositionReport"]
+                    mmsi = str(msg["UserID"])
+                    lat = msg["Latitude"]
+                    lon = msg["Longitude"]
+                    self.vessel_received.emit(mmsi, lat, lon)
+
+    def run(self):
+        asyncio.run(self.connect_ais_stream())
+
+    def stop(self):
+        self.running = False

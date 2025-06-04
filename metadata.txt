@@ -1,0 +1,13 @@
+# This file contains metadata for your plugin.
+
+# This file should be included when you package your plugin.# Mandatory items:
+
+[general]
+name=VesselTracker
+qgisMinimumVersion=3.0
+description=Displays vessels AIS position in real time
+version=0.1
+author=Reach Subsea
+email=vicente.danvila@reachsubsea.com
+icon=icon.png
+about=Creating a QGIS plugin to display position data in real-time using Python involves several key steps, including setting up the plugin structure, reading real-time data (e.g., from a GPS or a network stream), and updating a layer in QGIS accordingly.
