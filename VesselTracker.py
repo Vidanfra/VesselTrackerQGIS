@@ -3,6 +3,7 @@ from PyQt5.QtWidgets import QAction, QDialog, QTableWidgetItem
 from PyQt5.QtGui import QIcon
 from PyQt5.QtCore import QThread
 from qgis.core import (
+    Qgis,
     QgsVectorLayer,
     QgsFeature,
     QgsGeometry,
@@ -105,7 +106,7 @@ class VesselTracker:
         self.ais_thread.started.connect(self.ais_worker.run)
 
         self.iface.messageBar().pushMessage(
-            "Vessel Tracker", "Waiting AIS update…", level=0
+            "Vessel Tracker", "Waiting AIS update... (it can take several minutes)", level=0
         )
 
         # AISWorker will emit (mmsi_str, lat, lon) whenever a PositionReport arrives.
@@ -167,7 +168,8 @@ class VesselTracker:
         # Enable labeling by the "Name" field
         labeling = QgsPalLayerSettings()
         labeling.fieldName = "Name"
-        labeling.placement = QgsPalLayerSettings.OverPoint
+        labeling.placement = Qgis.LabelPlacement.OverPoint  # Updated placement mode
+        labeling.enabled = True
         self.layer.setLabelsEnabled(True)
         self.layer.setLabeling(QgsVectorLayerSimpleLabeling(labeling))
         self.layer.triggerRepaint()
