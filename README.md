@@ -2,6 +2,8 @@
 
 Vessel Tracker is a plugin for QGIS that allows you to track real-time positions of maritime vessels directly on your map canvas. It uses a live AIS (Automatic Identification System) data stream from [aisstream.io](https://aisstream.io/) and plots vessel locations as points on a memory layer.
 
+![Vessel Tracker QGIS example](QGIS_example.jpg)
+
 ## Features
 
 * **Real-Time Tracking:** Connects to a live AIS data stream to plot vessel positions as they are reported.
