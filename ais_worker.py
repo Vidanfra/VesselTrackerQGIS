@@ -4,6 +4,9 @@ import asyncio
 import websockets
 import json
 
+# Replace this example API KEY with your key, you can get it for free from # https://aisstream.io/
+API_KEY = "af5abf1c3ef9f7fbbb340b9a778187b7b46d8bc3"  # Example API Key, replace with your own
+
 class AISWorker(QObject):
     vessel_received = pyqtSignal(str, float, float)  # mmsi, lat, lon
 
@@ -15,8 +18,9 @@ class AISWorker(QObject):
     async def connect_ais_stream(self):
         async with websockets.connect("wss://stream.aisstream.io/v0/stream") as websocket:
             subscribe_message = {
-                "APIKey": "af5abf1c3ef9f7fbbb340b9a778187b7b46d8bc3",
-                "BoundingBoxes": [[[37, -17], [71, 31]]], # Europe
+                # Replace this example API KEY with your key, you can get it for free from # https://aisstream.io/
+                "APIKey": API_KEY,  # Example API Key, replace with your own
+                "BoundingBoxes": [[[-90, -180], [90, 180]]], # All vessels in the world
                 "FiltersShipMMSI": self.mmsi_name_map,  # adjust as needed
                 "FilterMessageTypes": ["PositionReport"]
             }
