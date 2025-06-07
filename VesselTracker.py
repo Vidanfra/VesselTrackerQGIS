@@ -1,8 +1,8 @@
 import os
+import json
 from PyQt5.QtWidgets import QAction, QDialog, QTableWidgetItem
 from PyQt5.QtGui import QIcon
-from PyQt5.QtCore import QThread, pyqtSlot
-# Near the other qgis.core imports in VesselTracker.py
+from PyQt5.QtCore import QThread
 from qgis.core import (
     QgsVectorLayer,
     QgsFeature,
@@ -13,7 +13,6 @@ from qgis.core import (
     QgsPalLayerSettings,
     QgsVectorLayerSimpleLabeling,
     edit,
-    Qgis,
 )
 from qgis.PyQt.QtCore import QVariant
 
@@ -26,19 +25,13 @@ plugin_dir = os.path.dirname(__file__)
 class VesselTracker:
     def __init__(self, iface):
         self.iface = iface
-
-        # In‐memory layer reference
         self.layer = None
-
-        # { mmsi_str: vessel_name }
         self.mmsi_name_map = {}
-
-        # { mmsi_str: feature_id }
         self.vessel_features = {}
-
-        # AIS thread & worker
         self.ais_thread = None
         self.ais_worker = None
+        # NEW: State flag to prevent starting a new thread while one is closing
+        self.is_shutting_down = False
 
     def initGui(self):
         icon = os.path.join(plugin_dir, "icon.png")
@@ -47,102 +40,143 @@ class VesselTracker:
         self.action.triggered.connect(self.run)
 
     def unload(self):
-        # Stop any running AIS worker
-        self._stop_ais_worker()
-
-        # Remove the toolbar icon
         self.iface.removeToolBarIcon(self.action)
         del self.action
-
-        # Remove the layer (if exists) from the project
-        if self.layer and self.layer.isValid():
+        self._stop_tracking()
+        if self.layer:
+            # Prevent crash on closing QGIS if thread is still shutting down
+            if self.is_shutting_down:
+                QThread.msleep(100) # Give a brief moment for cleanup
             QgsProject.instance().removeMapLayer(self.layer.id())
-            self.layer = None
 
     def run(self):
         """
-        1) Stop existing AISWorker (if any), clear the old layer.
-        2) Pop up VesselInputDialog to let user enter MMSI / Name rows.
-        3) Build mmsi_name_map, create a fresh layer, and start AISWorker.
+        Main logic to run the tracker.
+        - Stops any previous tracking session.
+        - Loads vessels from JSON and shows a dialog.
+        - If accepted, saves the list and starts tracking.
         """
+        self._stop_tracking()
 
-        # 1) If there is an existing AIS thread, stop it now:
-        self._stop_ais_worker()
-
-        # If there’s an old layer, remove it from the project so we can rebuild
-        if self.layer and self.layer.isValid():
-            QgsProject.instance().removeMapLayer(self.layer.id())
-            self.layer = None
-            self.vessel_features.clear()
-
-        # 2) Show the vessel‐input dialog
         dlg = QDialog(self.iface.mainWindow())
         ui = Ui_VesselInputDialog()
         ui.setupUi(dlg)
 
-        # Connect “Add” / “Remove” buttons
+        self.mmsi_name_map = self._load_vessels_from_json()
+        self._populate_table(ui, self.mmsi_name_map)
+
         ui.btnAdd.clicked.connect(lambda: self._on_add_row(ui))
         ui.btnRemove.clicked.connect(lambda: self._on_remove_selected_rows(ui))
-
-        # OK / Cancel
         ui.buttonBox.accepted.connect(dlg.accept)
         ui.buttonBox.rejected.connect(dlg.reject)
 
         if dlg.exec_() != QDialog.Accepted:
-            # User canceled — do nothing
             return
-
-        # Build {mmsi: name} dict
-        self.mmsi_name_map = self._read_table(ui)
-
-        if not self.mmsi_name_map:
+            
+        # --- CRITICAL FIX ---
+        # Check if the previous thread is still in the process of shutting down.
+        if self.is_shutting_down:
             self.iface.messageBar().pushMessage(
-                "Vessel Tracker", "No MMSI/Name pairs entered – aborting.", level=1
+                "Vessel Tracker",
+                "A previous session is still closing. Please try again in a moment.",
+                level=1, # Warning level
+                duration=5
             )
             return
+        # --- END FIX ---
 
-        # 3) Create a brand‐new layer
-        self._init_layer()
+        self.mmsi_name_map = self._read_table(ui)
+        self._save_vessels_to_json(self.mmsi_name_map)
 
-        # 4) Start AISWorker in its own QThread
-        mmsi_list = list(self.mmsi_name_map.keys())
-        self.ais_worker = AISWorker(mmsi_list)
-        self.ais_thread = QThread()
-        self.ais_worker.moveToThread(self.ais_thread)
-
-        # Connect the signals BEFORE starting the thread
-        self.ais_worker.vessel_received.connect(self.update_position)
-        # (If you want, you can add finish/error signals here, but not strictly needed.)
-
-        # When the thread starts, call the worker’s run()
-        self.ais_thread.started.connect(self.ais_worker.run)
-
-        self.ais_thread.start()
+        if not self.mmsi_name_map:
+            return
 
         self.iface.messageBar().pushMessage(
-            "Vessel Tracker", f"Tracking {len(mmsi_list)} vessel(s)…", level=0, duration=3
+            "Vessel Tracker", f"Tracking {len(self.mmsi_name_map)} vessel(s)…", level=0
         )
 
-    def _on_add_row(self, ui):
-        """Add a blank row to the QTableWidget."""
+        if not self.layer:
+            self._init_layer()
+
+        self.ais_worker = AISWorker(list(self.mmsi_name_map.keys()))
+        self.ais_thread = QThread()
+        self.ais_worker.moveToThread(self.ais_thread)
+        self.ais_worker.vessel_received.connect(self.update_position)
+        self.ais_thread.started.connect(self.ais_worker.run)
+        self.ais_thread.finished.connect(self._on_thread_finished)
+        self.ais_thread.start()
+
+    def _stop_tracking(self):
+        """
+        NON-BLOCKING shutdown of the tracking thread.
+        """
+        if self.ais_thread and self.ais_thread.isRunning():
+            # Set the flag to indicate a shutdown is in progress
+            self.is_shutting_down = True
+            if self.ais_worker:
+                try:
+                    self.ais_worker.vessel_received.disconnect(self.update_position)
+                except TypeError:
+                    pass
+                self.ais_worker.stop()
+            self.ais_thread.quit()
+
+    def _on_thread_finished(self):
+        """
+        Cleanup slot that is called ONLY when the thread has safely stopped.
+        """
+        self.iface.messageBar().pushMessage("Vessel Tracker", "Tracking session stopped.", level=0)
+        self.ais_worker = None
+        self.ais_thread = None
+        # Clear the flag, allowing a new session to be started
+        self.is_shutting_down = False
+
+    def _vessels_file_path(self):
+        return os.path.join(plugin_dir, 'tracked_vessels.json')
+
+    def _load_vessels_from_json(self):
+        file_path = self._vessels_file_path()
+        try:
+            if os.path.exists(file_path):
+                with open(file_path, 'r') as f:
+                    return json.load(f)
+        except (IOError, json.JSONDecodeError) as e:
+            self.iface.messageBar().pushMessage(
+                "Vessel Tracker", f"Could not load vessel file: {e}", level=2
+            )
+        return {}
+
+    def _save_vessels_to_json(self, vessels_map):
+        file_path = self._vessels_file_path()
+        try:
+            with open(file_path, 'w') as f:
+                json.dump(vessels_map, f, indent=4)
+        except IOError as e:
+            self.iface.messageBar().pushMessage(
+                "Vessel Tracker", f"Could not save vessel file: {e}", level=2
+            )
+
+    def _populate_table(self, ui, vessels_map):
         table = ui.tableVessels
-        row = table.rowCount()
-        table.insertRow(row)
-        table.setItem(row, 0, QTableWidgetItem(""))
-        table.setItem(row, 1, QTableWidgetItem(""))
+        table.setRowCount(0)
+        for mmsi, name in vessels_map.items():
+            row_count = table.rowCount()
+            table.insertRow(row_count)
+            table.setItem(row_count, 0, QTableWidgetItem(mmsi))
+            table.setItem(row_count, 1, QTableWidgetItem(name))
+
+    def _on_add_row(self, ui):
+        table = ui.tableVessels
+        row_count = table.rowCount()
+        table.insertRow(row_count)
 
     def _on_remove_selected_rows(self, ui):
-        """Remove all selected rows from the QTableWidget."""
         table = ui.tableVessels
         selected = table.selectionModel().selectedRows()
         for index in sorted(selected, key=lambda x: x.row(), reverse=True):
             table.removeRow(index.row())
 
     def _read_table(self, ui):
-        """
-        Read each row from ui.tableVessels and return {mmsi_str: name_str}.
-        Skip any row where MMSI or Name is blank.
-        """
         mapping = {}
         table = ui.tableVessels
         for row in range(table.rowCount()):
@@ -157,95 +191,38 @@ class VesselTracker:
         return mapping
 
     def _init_layer(self):
-        """
-        Create an empty memory layer with fields: “MMSI” and “Name”.
-        Enable labeling on the “Name” field.
-        """
-        uri = "Point?crs=EPSG:4326"
+        uri = "Point?crs=EPSG:4326&field=MMSI:string&field=Name:string"
         self.layer = QgsVectorLayer(uri, "AIS Tracked Vessels", "memory")
-        pr = self.layer.dataProvider()
-        pr.addAttributes(
-            [QgsField("MMSI", QVariant.String), QgsField("Name", QVariant.String)]
-        )
-        self.layer.updateFields()
         QgsProject.instance().addMapLayer(self.layer)
-
-        # Enable labeling using “Name” attribute
-        label_settings = QgsPalLayerSettings()
-        label_settings.fieldName = "Name"
-        label_settings.placement = Qgis.LabelPlacement.OverPoint
-        label_settings.enabled = True
-
-        labeling = QgsVectorLayerSimpleLabeling(label_settings)
-        self.layer.setLabeling(labeling)
+        labeling = QgsPalLayerSettings()
+        labeling.fieldName = "Name"
+        labeling.placement = QgsPalLayerSettings.OverPoint
         self.layer.setLabelsEnabled(True)
+        self.layer.setLabeling(QgsVectorLayerSimpleLabeling(labeling))
         self.layer.triggerRepaint()
-
-        # Reset vessel_features map
         self.vessel_features = {}
 
     def update_position(self, mmsi, lat, lon):
-        """
-        Called whenever AISWorker emits a new (mmsi, lat, lon).
-        We look up vessel_name = self.mmsi_name_map[mmsi], create or update
-        a feature whose attributes are [mmsi, vessel_name].
-        """
-        vessel_name = self.mmsi_name_map.get(mmsi, mmsi)  # fallback to MMSI if no name
+        if not self.layer: return
+        vessel_name = self.mmsi_name_map.get(mmsi, mmsi)
         point = QgsPointXY(lon, lat)
         geom = QgsGeometry.fromPointXY(point)
-
-        # Use an editing transaction for all layer modifications
         with edit(self.layer):
-            # Check if we are already tracking this vessel
             if mmsi in self.vessel_features:
                 fid = self.vessel_features[mmsi]
                 self.layer.changeGeometry(fid, geom)
-            
-            # This is the first time we've seen this vessel
             else:
-                # 1. Create a new feature object
                 feat = QgsFeature(self.layer.fields())
                 feat.setGeometry(geom)
                 feat.setAttributes([mmsi, vessel_name])
-
-                # 2. Add the feature via the data provider
                 pr = self.layer.dataProvider()
                 success, added_features = pr.addFeatures([feat])
-
-                # 3. CRITICAL: Check if adding succeeded and capture the REAL feature ID
                 if success and added_features:
                     new_id = added_features[0].id()
                     self.vessel_features[mmsi] = new_id
-                    self.layer.updateExtents() # Zoom to the new feature
+                    self.layer.updateExtents()
 
-        # The 'with edit' block handles all refreshes.
-        
         msg = f"New AIS update - Vessel: {vessel_name}, LAT: {lat}, LON: {lon}, MMSI: {mmsi}"
         self.iface.messageBar().pushMessage(
             "Vessel Tracker", msg, level=0
         )
-
-    def _stop_ais_worker(self):
-        """
-        If AISWorker + QThread exist, stop the worker, quit the thread, wait, and clean up.
-        """
-        if self.ais_worker:
-            # Ask the worker to stop its loop
-            try:
-                self.ais_worker.stop()
-            except Exception:
-                pass
-
-            # Disconnect its signal(s)
-            try:
-                self.ais_worker.vessel_received.disconnect(self.update_position)
-            except Exception:
-                pass
-
-            self.ais_worker = None
-
-        if self.ais_thread:
-            self.ais_thread.quit()
-            self.ais_thread.wait()
-            self.ais_thread = None
-
