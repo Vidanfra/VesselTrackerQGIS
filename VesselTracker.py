@@ -48,6 +48,7 @@ class VesselTracker:
             QgsProject.instance().removeMapLayer(self.layer.id())
 
     def run(self):
+        # The dependency check is now handled in __init__.py and can be removed from here.
         self._stop_tracking()
 
         dlg = QDialog(self.iface.mainWindow())
