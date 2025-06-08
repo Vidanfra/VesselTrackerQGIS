@@ -21,7 +21,6 @@ from .vessel_input_dialog import Ui_VesselInputDialog
 
 plugin_dir = os.path.dirname(__file__)
 
-
 class VesselTracker:
     def __init__(self, iface):
         self.iface = iface
@@ -30,8 +29,8 @@ class VesselTracker:
         self.vessel_features = {}
         self.ais_thread = None
         self.ais_worker = None
-        # NEW: State flag to prevent starting a new thread while one is closing
         self.is_shutting_down = False
+        self.api_key = ""
 
     def initGui(self):
         icon = os.path.join(plugin_dir, "icon.png")
@@ -44,25 +43,24 @@ class VesselTracker:
         del self.action
         self._stop_tracking()
         if self.layer:
-            # Prevent crash on closing QGIS if thread is still shutting down
             if self.is_shutting_down:
-                QThread.msleep(100) # Give a brief moment for cleanup
+                QThread.msleep(100)
             QgsProject.instance().removeMapLayer(self.layer.id())
 
     def run(self):
-        """
-        Main logic to run the tracker.
-        - Stops any previous tracking session.
-        - Loads vessels from JSON and shows a dialog.
-        - If accepted, saves the list and starts tracking.
-        """
         self._stop_tracking()
 
         dlg = QDialog(self.iface.mainWindow())
         ui = Ui_VesselInputDialog()
         ui.setupUi(dlg)
 
-        self.mmsi_name_map = self._load_vessels_from_json()
+        # Load existing config (API Key and Vessels)
+        config = self._load_config()
+        self.api_key = config.get("api_key", "")
+        self.mmsi_name_map = config.get("vessels", {})
+
+        # Populate the UI with loaded data
+        ui.leApiKey.setText(self.api_key) # Populate the new API Key field
         self._populate_table(ui, self.mmsi_name_map)
 
         ui.btnAdd.clicked.connect(lambda: self._on_add_row(ui))
@@ -72,21 +70,31 @@ class VesselTracker:
 
         if dlg.exec_() != QDialog.Accepted:
             return
-            
-        # --- CRITICAL FIX ---
-        # Check if the previous thread is still in the process of shutting down.
+
         if self.is_shutting_down:
             self.iface.messageBar().pushMessage(
                 "Vessel Tracker",
                 "A previous session is still closing. Please try again in a moment.",
-                level=1, # Warning level
+                level=1,
                 duration=5
             )
             return
-        # --- END FIX ---
 
+        # Get data from the UI before starting
+        self.api_key = ui.leApiKey.text().strip()
         self.mmsi_name_map = self._read_table(ui)
-        self._save_vessels_to_json(self.mmsi_name_map)
+
+        # Save the new configuration
+        self._save_config({
+            "api_key": self.api_key,
+            "vessels": self.mmsi_name_map
+        })
+        
+        if not self.api_key:
+            self.iface.messageBar().pushMessage(
+                "Vessel Tracker", "API Key is missing. Cannot start tracking.", level=2
+            )
+            return
 
         if not self.mmsi_name_map:
             return
@@ -98,7 +106,8 @@ class VesselTracker:
         if not self.layer:
             self._init_layer()
 
-        self.ais_worker = AISWorker(list(self.mmsi_name_map.keys()))
+        # Pass both the vessel list and the API key to the worker
+        self.ais_worker = AISWorker(list(self.mmsi_name_map.keys()), self.api_key)
         self.ais_thread = QThread()
         self.ais_worker.moveToThread(self.ais_thread)
         self.ais_worker.vessel_received.connect(self.update_position)
@@ -107,11 +116,7 @@ class VesselTracker:
         self.ais_thread.start()
 
     def _stop_tracking(self):
-        """
-        NON-BLOCKING shutdown of the tracking thread.
-        """
         if self.ais_thread and self.ais_thread.isRunning():
-            # Set the flag to indicate a shutdown is in progress
             self.is_shutting_down = True
             if self.ais_worker:
                 try:
@@ -122,38 +127,37 @@ class VesselTracker:
             self.ais_thread.quit()
 
     def _on_thread_finished(self):
-        """
-        Cleanup slot that is called ONLY when the thread has safely stopped.
-        """
         self.iface.messageBar().pushMessage("Vessel Tracker", "Tracking session stopped.", level=0)
         self.ais_worker = None
         self.ais_thread = None
-        # Clear the flag, allowing a new session to be started
         self.is_shutting_down = False
 
-    def _vessels_file_path(self):
-        return os.path.join(plugin_dir, 'tracked_vessels.json')
+    def _config_file_path(self):
+        """Returns the path for the configuration JSON file."""
+        return os.path.join(plugin_dir, 'config.json')
 
-    def _load_vessels_from_json(self):
-        file_path = self._vessels_file_path()
+    def _load_config(self):
+        """Loads configuration (API Key and vessels) from the JSON file."""
+        file_path = self._config_file_path()
         try:
             if os.path.exists(file_path):
                 with open(file_path, 'r') as f:
                     return json.load(f)
         except (IOError, json.JSONDecodeError) as e:
             self.iface.messageBar().pushMessage(
-                "Vessel Tracker", f"Could not load vessel file: {e}", level=2
+                "Vessel Tracker", f"Could not load config file: {e}", level=2
             )
-        return {}
+        return {} # Return empty dict if file doesn't exist or is corrupt
 
-    def _save_vessels_to_json(self, vessels_map):
-        file_path = self._vessels_file_path()
+    def _save_config(self, config_data):
+        """Saves configuration (API Key and vessels) to the JSON file."""
+        file_path = self._config_file_path()
         try:
             with open(file_path, 'w') as f:
-                json.dump(vessels_map, f, indent=4)
+                json.dump(config_data, f, indent=4)
         except IOError as e:
             self.iface.messageBar().pushMessage(
-                "Vessel Tracker", f"Could not save vessel file: {e}", level=2
+                "Vessel Tracker", f"Could not save config file: {e}", level=2
             )
 
     def _populate_table(self, ui, vessels_map):
@@ -221,8 +225,7 @@ class VesselTracker:
                     new_id = added_features[0].id()
                     self.vessel_features[mmsi] = new_id
                     self.layer.updateExtents()
-
+        
         msg = f"New AIS update - Vessel: {vessel_name}, LAT: {lat}, LON: {lon}, MMSI: {mmsi}"
         self.iface.messageBar().pushMessage(
-            "Vessel Tracker", msg, level=0
-        )
+            "Vessel Tracker", msg, level=0)

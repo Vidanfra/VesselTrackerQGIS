@@ -26,30 +26,32 @@ pip install websockets
 
 1.  Go to the [Releases page](https://github.com/your-username/your-repo/releases) of this GitHub repository. <!-- Update this link -->
 2.  Download the latest `VesselTracker.zip` file.
-3.  Create an account in https://aisstream.io/ and get your API key for free
-4.  Paste your API key in the code of ais_worker
-5.  Open QGIS.
-6.  Navigate to **Plugins -> Manage and Install Plugins...**.
-7.  In the dialog, select the **Install from ZIP** tab.
-8.  Click the `...` button and browse to the `VesselTracker.zip` file you downloaded.
-9.  Click the **Install Plugin** button.
-10.  Once installed, ensure the plugin is enabled by checking the box next to "Vessel Tracker" in the **Installed** tab.
+3.  Open QGIS.
+4.  Navigate to **Plugins -> Manage and Install Plugins...**.
+5.  In the dialog, select the **Install from ZIP** tab.
+6.  Click the `...` button and browse to the `VesselTracker.zip` file you downloaded.
+7.  Click the **Install Plugin** button.
+8.  Once installed, ensure the plugin is enabled by checking the box next to "Vessel Tracker" in the **Installed** tab.
+9. Create an account in https://aisstream.io/ and **get your API key** for free
 
 You should now see the Vessel Tracker icon (a ship) in your QGIS toolbar.
 
 ## How to Use
 
 1.  **Launch the Plugin:** Click the **Vessel Tracker** icon in the QGIS toolbar.
-2.  **Configure Vessels:** A dialog will appear.
+2.  **Introduce your API key:** 
+    * You can get it for **free** from https://aisstream.io/. 
+    * It will be saved for previous sessions
+3.  **Configure Vessels:** A dialog will appear.
     * The table will be pre-populated with any vessels you have tracked before.
     * To track a new vessel, click the **Add** button and enter its **MMSI** and a **Name** you want to use for its label.
     * To stop tracking a vessel, select its row and click the **Remove** button.
-3.  **Start Tracking:** Click the **OK** button.
+4.  **Start Tracking:** Click the **OK** button.
     * The plugin will connect to the AIS stream.
     * The "AIS Tracked Vessels" layer will be added to your Layers Panel if it isn't already there.
     * As position reports are received, points will appear and move on your map. A message will also appear in the QGIS Message Bar for each update.
-4.  **Re-configuring:** To add or remove vessels, simply click the Vessel Tracker icon again. The current tracking session will stop, and the dialog will re-appear. After you click "OK", a new session will start with the updated vessel list.
-5.  **Stopping the Tracker:** To stop the tracking, you can either:
+5.  **Re-configuring:** To add or remove vessels, simply click the Vessel Tracker icon again. The current tracking session will stop, and the dialog will re-appear. After you click "OK", a new session will start with the updated vessel list.
+6.  **Stopping the Tracker:** To stop the tracking, you can either:
     * Click the icon and then click **Cancel** in the dialog.
     * Unload the plugin through the **Manage and Install Plugins** dialog.
     * Close QGIS.
@@ -71,11 +73,6 @@ You should now see the Vessel Tracker icon (a ship) in your QGIS toolbar.
 
 * Ensure the `websockets` dependency is installed correctly in your QGIS Python environment (see **Dependencies** section).
 * Go to **Plugins -> Manage and Install Plugins...** and ensure the "Vessel Tracker" plugin is checked (enabled) in the **Installed** tab.
-
-
-## Note on API Key
-
-This plugin uses a public data stream from `aisstream.io`. The source code includes a hardcoded API key for demonstration and basic use. For heavy or critical use, it is highly recommended that you register for your own free API key at [aisstream.io](https://aisstream.io/) and replace the one in the `ais_worker.py` file.
 
 ## Author
 This plugin was created by Vicente Danvila. 

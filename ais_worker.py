@@ -1,27 +1,35 @@
 # ais_worker.py
-from PyQt5.QtCore import QObject, QThread, pyqtSignal
+from PyQt5.QtCore import QObject, pyqtSignal
 import asyncio
 import websockets
 import json
 
-# Replace this example API KEY with your key, you can get it for free from # https://aisstream.io/
-API_KEY = "af5abf1c3ef9f7fbbb340b9a778187b7b46d8bc3"  # Example API Key, replace with your own
-
 class AISWorker(QObject):
     vessel_received = pyqtSignal(str, float, float)  # mmsi, lat, lon
 
-    def __init__(self, mmsi_name_map, parent=None):
+    def __init__(self, mmsi_list, api_key, parent=None):
+        """
+        The worker now accepts the API key as an argument.
+        """
         super().__init__(parent)
-        self.mmsi_name_map = mmsi_name_map #["258647000"]
+        self.mmsi_list = mmsi_list
+        self.api_key = api_key  # Store the API key
         self.running = True
 
     async def connect_ais_stream(self):
+        """
+        Connects to the AIS stream using the provided API key.
+        """
+        # Do not proceed if the API key is missing.
+        if not self.api_key:
+            print("AIS Worker: API Key is missing. Aborting connection.")
+            return
+
         async with websockets.connect("wss://stream.aisstream.io/v0/stream") as websocket:
             subscribe_message = {
-                # Replace this example API KEY with your key, you can get it for free from # https://aisstream.io/
-                "APIKey": API_KEY,  # Example API Key, replace with your own
-                "BoundingBoxes": [[[-90, -180], [90, 180]]], # All vessels in the world
-                "FiltersShipMMSI": self.mmsi_name_map,  # adjust as needed
+                "APIKey": self.api_key,  # Use the API key from the constructor
+                "BoundingBoxes": [[[-90, -180], [90, 180]]], # World
+                "FiltersShipMMSI": self.mmsi_list,
                 "FilterMessageTypes": ["PositionReport"]
             }
 
@@ -31,7 +39,12 @@ class AISWorker(QObject):
                 if not self.running:
                     break
                 message = json.loads(message_json)
-                if message["MessageType"] == "PositionReport":
+                # Add a check for error messages from the server (e.g., invalid API key)
+                if message.get("MessageType") == "ErrorMessage":
+                    print(f"AIS Stream Error: {message.get('Message')}")
+                    break
+                
+                if message.get("MessageType") == "PositionReport":
                     msg = message["Message"]["PositionReport"]
                     mmsi = str(msg["UserID"])
                     lat = msg["Latitude"]
@@ -39,7 +52,17 @@ class AISWorker(QObject):
                     self.vessel_received.emit(mmsi, lat, lon)
 
     def run(self):
-        asyncio.run(self.connect_ais_stream())
+        """
+        Runs the asyncio event loop to connect to the stream.
+        """
+        try:
+            asyncio.run(self.connect_ais_stream())
+        except Exception as e:
+            # Log any exceptions that occur during connection or streaming
+            print(f"AIS Worker Error: {e}")
 
     def stop(self):
+        """
+        Stops the worker loop.
+        """
         self.running = False
