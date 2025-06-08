@@ -10,4 +10,4 @@ version=0.1
 author=Reach Subsea
 email=vicente.danvila@reachsubsea.com
 icon=icon.png
-about=Creating a QGIS plugin to display position data in real-time using Python involves several key steps, including setting up the plugin structure, reading real-time data (e.g., from a GPS or a network stream), and updating a layer in QGIS accordingly.
+about=Creating a QGIS plugin to display position data in real-time using Python involves several key steps, including setting up the plugin structure, reading real-time data (e.g., from a GPS or a network stream), and updating a layer in QGIS accordingly. You can find more information on https://github.com/Vidanfra/VesselTrackerQGIS .

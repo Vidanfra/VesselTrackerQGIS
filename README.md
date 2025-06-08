@@ -11,12 +11,13 @@ Vessel Tracker is a plugin for QGIS that allows you to track real-time positions
 * **Persistent Vessel List:** Your list of tracked vessels is saved between QGIS sessions.
 * **User-Friendly Configuration:** An intuitive dialog allows you to add or remove vessels to track by their MMSI (Maritime Mobile Service Identity) and a custom name.
 * **Automatic Layer Creation:** Automatically creates and manages a memory layer named "AIS Tracked Vessels" to display the data.
+* **Personal API key:** Simple user interface to introduce your personal API key from aisstream.io
 
 ## Dependencies
 
 This plugin requires the `websockets` Python library to connect to the AIS data stream. Before installing the plugin, you need to install this dependency into the Python environment used by QGIS.
 
-The easiest way to do this is to open the **QGIS OSGeo4W Shell** (found in your Start Menu with your QGIS installation) and run:
+The easiest way to do this is to open the **OSGeo4W Shell** (found in your Start Menu with your QGIS installation) and run:
 
 ```bash
 pip install websockets
@@ -24,8 +25,8 @@ pip install websockets
 
 ## Installation
 
-1.  Go to the [Releases page](https://github.com/your-username/your-repo/releases) of this GitHub repository. <!-- Update this link -->
-2.  Download the latest `VesselTracker.zip` file.
+1.  Download the latest `VesselTracker.zip` file from this Github repository.
+2.  Install dependencies in OSGeo4W Shell. Run the command `pip install websockets`
 3.  Open QGIS.
 4.  Navigate to **Plugins -> Manage and Install Plugins...**.
 5.  In the dialog, select the **Install from ZIP** tab.
@@ -59,10 +60,10 @@ You should now see the Vessel Tracker icon (a ship) in your QGIS toolbar.
 ## Troubleshooting
 
 #### Q: I clicked "OK" but no vessels are appearing on the map.
-* **Wait a few seconds:** Sometimes the AIS position data can take several seconds or even minutes to come
+* **Wait a few seconds:** Sometimes the AIS position data can take several seconds or even minutes to come.
 * **Check MMSI:** Ensure the MMSI numbers you entered are correct.
 * **Check Internet Connection:** The plugin requires an active internet connection to receive data.
-* **Data Availability:** The vessel must be actively broadcasting its position within the geographical area covered by the data stream (the default is Europe). If a vessel is in port or has its AIS transponder turned off, no data will be received.
+* **Data Availability:** The vessel must be actively broadcasting its position. If a vessel is in port or has its AIS transponder turned off, no data will be received.
 * **Check Logs:** Look at the QGIS Log Messages Panel (**View -> Panels -> Log Messages**) for any error messages.
 
 #### Q: The plugin crashed QGIS.
